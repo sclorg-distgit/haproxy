@@ -1,3 +1,6 @@
+%{?scl:%scl_package haproxy}
+%{!?scl:%global pkg_name %{name}}
+
 %define haproxy_user    haproxy
 %define haproxy_group   %{haproxy_user}
 %define haproxy_home    %{_localstatedir}/lib/haproxy
@@ -6,10 +9,10 @@
 
 %global _hardened_build 1
 
-Name:           haproxy
+Name:           %{?scl_prefix}haproxy
 Version:        1.8.3
-Release:        2%{?dist}
-Summary:        HAProxy reverse proxy for high availability environments
+Release:        1%{?dist}
+Summary:        TCP/HTTP proxy and load balancer for high availability environments
 
 Group:          System Environment/Daemons
 License:        GPLv2+
@@ -22,11 +25,12 @@ Source3:        %{name}.logrotate
 Source4:        %{name}.sysconfig
 Source5:        halog.1
 
-BuildRequires:  lua-devel
 BuildRequires:  pcre-devel
 BuildRequires:  zlib-devel
 BuildRequires:  openssl-devel
 BuildRequires:  systemd-units
+
+%{?scl:Requires: %scl_runtime}
 
 Requires(pre):      shadow-utils
 Requires(post):     systemd
@@ -39,13 +43,13 @@ availability environments. Indeed, it can:
  - route HTTP requests depending on statically assigned cookies
  - spread load among several servers while assuring server persistence
    through the use of HTTP cookies
- - switch to backup servers in the event a main one fails
+ - switch to backup servers in the event a main server fails
  - accept connections to special ports dedicated to service monitoring
  - stop accepting connections without breaking existing ones
  - add, modify, and delete HTTP headers in both directions
  - block requests matching particular patterns
  - report detailed status to authenticated users from a URI
-   intercepted from the application
+   intercepted by the application
 
 %prep
 %setup -q
@@ -56,10 +60,10 @@ regparm_opts=
 regparm_opts="USE_REGPARM=1"
 %endif
 
-%{__make} %{?_smp_mflags} CPU="generic" TARGET="linux2628" USE_OPENSSL=1 USE_PCRE=1 USE_ZLIB=1 USE_LUA=1 ${regparm_opts} ADDINC="%{optflags}" USE_LINUX_TPROXY=1 ADDLIB="%{__global_ldflags}"
+%{__make} %{?_smp_mflags} CPU="generic" TARGET="linux2628" USE_OPENSSL=1 USE_PCRE=1 USE_ZLIB=1 ${regparm_opts} ADDINC="%{optflags}" USE_LINUX_TPROXY=1 ADDLIB="%{__global_ldflags}"
 
 pushd contrib/halog
-%{__make} ${halog} OPTIMIZE="%{optflags}"
+%{__make} halog OPTIMIZE="%{optflags}"
 popd
 
 pushd contrib/iprange
@@ -82,7 +86,7 @@ popd
 %{__install} -p -m 0755 ./contrib/iprange/iprange %{buildroot}%{_bindir}/iprange
 %{__install} -p -m 0644 ./examples/errorfiles/* %{buildroot}%{haproxy_datadir}
 
-for httpfile in $(find ./examples/errorfiles/ -type f) 
+for httpfile in $(find ./examples/errorfiles/ -type f)
 do
     %{__install} -p -m 0644 $httpfile %{buildroot}%{haproxy_datadir}
 done
@@ -91,7 +95,7 @@ done
 
 find ./examples/* -type f ! -name "*.cfg" -exec %{__rm} -f "{}" \;
 
-for textfile in $(find ./ -type f -name '*.txt')
+for textfile in $(find ./ -type f -name "*.txt" -o -name README)
 do
     %{__mv} $textfile $textfile.old
     iconv --from-code ISO8859-1 --to-code UTF-8 --output $textfile $textfile.old
@@ -99,12 +103,14 @@ do
 done
 
 %pre
-getent group %{haproxy_group} >/dev/null || \
-    groupadd -r %{haproxy_group}
-getent passwd %{haproxy_user} >/dev/null || \
-    useradd -r -g %{haproxy_user} -d %{haproxy_home} \
-    -s /sbin/nologin -c "haproxy" %{haproxy_user}
-exit 0
+getent group %{haproxy_group} >/dev/null || groupadd -f -g 188 -r %{haproxy_group}
+if ! getent passwd %{haproxy_user} >/dev/null ; then
+    if ! getent passwd 188 >/dev/null ; then
+        useradd -r -u 188 -g %{haproxy_group} -d %{haproxy_home} -s /sbin/nologin -c "haproxy" %{haproxy_user}
+    else
+        useradd -r -g %{haproxy_group} -d %{haproxy_home} -s /sbin/nologin -c "haproxy" %{haproxy_user}
+    fi
+fi
 
 %post
 %systemd_post %{name}.service
@@ -117,7 +123,7 @@ exit 0
 
 %files
 %defattr(-,root,root,-)
-%doc doc/* examples/*
+%doc doc/* examples/
 %doc CHANGELOG LICENSE README ROADMAP VERSION
 %dir %{haproxy_confdir}
 %dir %{haproxy_datadir}
@@ -133,170 +139,92 @@ exit 0
 %attr(-,%{haproxy_user},%{haproxy_group}) %dir %{haproxy_home}
 
 %changelog
-* Fri Jan 05 2018 Ryan O'Hara <rohara@redhat.com> - 1.8.3-2
-- Remove haproxy-systemd-wrapper
+* Thu Nov 30 2017 Ryan O'Hara <rohara@redhat.com> - 1.5.18-7
+- Rebuild with openssl-1.0.2k (#1509139)
 
-* Fri Jan 05 2018 Ryan O'Hara <rohara@redhat.com> - 1.8.3-1
-- Update to 1.8.3 (#1528829)
+* Mon May 01 2017 Ryan O'Hara <rohara@redhat.com> - 1.5.18-6
+- Use KillMode=mixed in systemd service file (#1444709)
 
-* Wed Dec 27 2017 Ryan O'Hara <rohara@redhat.com> - 1.8.2-1
-- Update to 1.8.2
+* Thu Mar 16 2017 Ryan O'Hara <rohara@redhat.com> - 1.5.18-5
+- Use soft-static allocation for haproxy UID/GID (#1386130)
 
-* Fri Dec 15 2017 Ryan O'Hara <rohara@redhat.com> - 1.8.1-1
-- Update to 1.8.1
+* Wed Nov 16 2016 Ryan O'Hara <rohara@redhat.com> - 1.5.18-4
+- Return correct exit codes from systemd-wrapper (#1391990)
 
-* Fri Dec 15 2017 Ryan O'Hara <rohara@redhat.com> - 1.8.0-1
-- Update to 1.8.0
+* Tue Jun 21 2016 Ryan O'Hara <rohara@redhat.com> - 1.5.18-3
+- Fix TCP user timeout patch for 1.5.18 release
 
-* Mon Sep 11 2017 Ryan O'Hara <rohara@redhat.com> - 1.7.9-1
-- Update to 1.7.9 (#1485084)
+* Thu Jun 16 2016 Ryan O'Hara <rohara@redhat.com> - 1.5.18-2
+- Add TARGET to install-bin for haproxy-systemd-wrapper
 
-* Wed Aug 02 2017 Fedora Release Engineering <releng@fedoraproject.org> - 1.7.8-3
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_27_Binutils_Mass_Rebuild
+* Wed Jun 15 2016 Ryan O'Hara <rohara@redhat.com> - 1.5.18-1
+- Update to stable release 1.5.18 (#1344012)
 
-* Wed Jul 26 2017 Fedora Release Engineering <releng@fedoraproject.org> - 1.7.8-2
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_27_Mass_Rebuild
-
-* Mon Jul 10 2017 Ryan O'Hara <rohara@redhat.com> - 1.7.8-1
-- Update to 1.7.8 (#1436669)
-
-* Mon May 01 2017 Ryan O'Hara <rohara@redhat.com> - 1.7.3-2
-- Use KillMode=mixed in systemd service file (#1447085)
-
-* Sun Mar 26 2017 Ryan O'Hara <rohara@redhat.com> - 1.7.3-1
-- Update to 1.7.3 (#1413276)
-
-* Fri Feb 10 2017 Fedora Release Engineering <releng@fedoraproject.org> - 1.7.2-2
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_26_Mass_Rebuild
-
-* Wed Jan 18 2017 Ryan O'Hara <rohara@redhat.com> - 1.7.2-1
-- Update to 1.7.2 (#1413276)
-
-* Thu Dec 29 2016 Ryan O'Hara <rohara@redhat.com> - 1.7.1-1
-- Update to 1.7.1
-
-* Mon Nov 28 2016 Ryan O'Hara <rohara@redhat.com> - 1.7.0-1
-- Update to 1.7.0
-
-* Mon Nov 21 2016 Ryan O'Hara <rohara@redhat.com> - 1.6.10-1
-- Update to 1.6.10 (#1397013)
-
-* Wed Aug 31 2016 Ryan O'Hara <rohara@redhat.com> - 1.6.9-1
-- Update to 1.6.9 (#1370709)
-
-* Thu Jul 14 2016 Ryan O'Hara <rohara@redhat.com> - 1.6.7-2
-- Fix main frontend in default config file (#1348674)
-
-* Thu Jul 14 2016 Ryan O'Hara <rohara@redhat.com> - 1.6.7-1
-- Update to 1.6.7 (#1356578)
-
-* Tue Jun 28 2016 Ryan O'Hara <rohara@redhat.com> - 1.6.6-2
-- Remove patch for CVE-2016-5360
-
-* Tue Jun 28 2016 Ryan O'Hara <rohara@redhat.com> - 1.6.6-1
-- Update to 1.6.6 (#1350426)
-
-* Wed Jun 15 2016 Ryan O'Hara <rohara@redhat.com> - 1.6.5-3
-- Fix reqdeny causing random crashes (CVE-2016-5360, #1346672)
-
-* Fri Jun 03 2016 Ryan O'Hara <rohara@redhat.com> - 1.6.5-2
-- Utilize system-wide crypto-policies (#1256253)
-
-* Mon May 23 2016 Ryan O'Hara <rohara@redhat.com> - 1.6.5-1
-- Update to 1.6.5 (#1317313)
-
-* Wed Feb 03 2016 Fedora Release Engineering <releng@fedoraproject.org> - 1.6.3-2
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_24_Mass_Rebuild
-
-* Wed Jan 20 2016 Ryan O'Hara <rohara@redhat.com> - 1.6.3-1
-- Update to 1.6.3 (#1276288)
-
-* Wed Nov 18 2015 Ryan O'Hara <rohara@redhat.com> - 1.6.2-3
-- Enable Lua support
-
-* Tue Nov 03 2015 Ryan O'Hara <rohara@redhat.com> - 1.6.2-2
-- Update to 1.6.2 (#1276288)
-
-* Fri Oct 30 2015 Ryan O'Hara <rohara@redhat.com> - 1.6.1-1
-- Update to 1.6.1 (#1276288)
+* Tue Aug 25 2015 Ryan O'Hara <rohara@redhat.com> - 1.5.14-3
+- Add EnvironmentFile to systemd service (#1191675)
 
 * Mon Jul 06 2015 Ryan O'Hara <rohara@redhat.com> - 1.5.14-1
-- Update to 1.5.14 (CVE-2015-3281, #1239181)
+- Update to stable release 1.5.14 (CVE-2015-3281, #1212193)
 
-* Fri Jun 26 2015 Ryan O'Hara <rohara@redhat.com> - 1.5.13-1
-- Update to 1.5.13 (#1236056)
+* Wed Jun 24 2015 Ryan O'Hara <rohara@redhat.com> - 1.5.12-2
+- Rebase TCP uset timeout patch for 1.5.12 release (#1212193)
 
-* Wed Jun 17 2015 Fedora Release Engineering <rel-eng@lists.fedoraproject.org> - 1.5.12-3
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_23_Mass_Rebuild
+* Tue Jun 23 2015 Ryan O'Hara <rohara@redhat.com> - 1.5.12-1
+- Update to stable release 1.5.12 (#1212193)
 
-* Tue May 05 2015 Ryan O'Hara <rohara@redhat.com> - 1.5.12-2
-- Remove unused patches
+* Thu May 21 2015 Ryan O'Hara <rohara@redhat.com> - 1.5.4-5
+- Define TCP_USER_TIMEOUT at build time (#1190776)
 
-* Tue May 05 2015 Ryan O'Hara <rohara@redhat.com> - 1.5.12-1
-- Update to 1.5.12 (#1217922)
+* Wed Mar 04 2015 Ryan O'Hara <rohara@redhat.com> - 1.5.4-4
+- Read sysconfig file for extra options (#1191675)
 
-* Wed Mar 04 2015 Ryan O'Hara <rohara@redhat.com> - 1.5.11-4
-- Rework systemd service and sysconfig file
+* Wed Mar 04 2015 Ryan O'Hara <rohara@redhat.com> - 1.5.4-3
+- Add tcp-ut bind option to set TCP_USER_TIMEOUT (#1190776)
 
-* Wed Feb 11 2015 Ryan O'Hara <rohara@redhat.com> - 1.5.11-3
-- Add sysconfig file
-
-* Tue Feb 10 2015 Ryan O'Hara <rohara@redhat.com> - 1.5.11-2
-- Add tcp-ut bind option to set TCP_USER_TIMEOUT (#1190783)
-
-* Sun Feb 01 2015 Ryan O'Hara <rohara@redhat.com> - 1.5.11-1
-- Update to 1.5.11 (#1188029)
-
-* Mon Jan 05 2015 Ryan O'Hara <rohara@redhat.com> - 1.5.10-1
-- Update to 1.5.10
-
-* Mon Dec 01 2014 Ryan O'Hara <rohara@redhat.com> - 1.5.9-1
-- Update to 1.5.9
-
-* Sat Nov 01 2014 Ryan O'Hara <rohara@redhat.com> - 1.5.8-1
-- Update to 1.5.8
-
-* Thu Oct 30 2014 Ryan O'Hara <rohara@redhat.com> - 1.5.7-1
-- Update to 1.5.7
-
-* Mon Oct 20 2014 Ryan O'Hara <rohara@redhat.com> - 1.5.6-1
-- Update to 1.5.6
-
-* Wed Oct 08 2014 Ryan O'Hara <rohara@redhat.com> - 1.5.5-1
-- Update to 1.5.5
+* Tue Nov 18 2014 Ryan O'Hara <rohara@redhat.com> - 1.5.4-2
+- Fix date in changelog
 
 * Tue Sep 02 2014 Ryan O'Hara <rohara@redhat.com> - 1.5.4-1
-- Update to 1.5.4
-
-* Sat Aug 16 2014 Fedora Release Engineering <rel-eng@lists.fedoraproject.org> - 1.5.3-3
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_21_22_Mass_Rebuild
-
-* Wed Aug 06 2014 Ryan O'Hara <rohara@redhat.com> - 1.5.3-2
-- Use haproxy-systemd-wrapper in service file (#1126955)
+- Update to stable release 1.5.4 (#1111714)
 
 * Fri Jul 25 2014 Ryan O'Hara <rohara@redhat.com> - 1.5.3-1
-- Update to 1.5.3
+- Update to stable release 1.5.3 (#1111714)
 
 * Tue Jul 15 2014 Ryan O'Hara <rohara@redhat.com> - 1.5.2-1
-- Update to 1.5.2
+- Update to stable release 1.5.2 (#1111714)
 
-* Tue Jun 24 2014 Ryan O'Hara <rohara@redhat.com> - 1.5.1-1
-- Update to 1.5.1
+* Tue Jul 08 2014 Ryan O'Hara <rohara@redhat.com> - 1.5.1-6
+- Cleanup spec file (#1068642)
 
-* Thu Jun 19 2014 Ryan O'Hara <rohara@redhat.com> - 1.5.0-2
-- Build with zlib and openssl support
+* Tue Jul 08 2014 Ryan O'Hara <rohara@redhat.com> - 1.5.1-5
+- Minor changes to summary and description (#1067146)
 
-* Thu Jun 19 2014 Ryan O'Hara <rohara@redhat.com> - 1.5.0-1
-- Update to 1.5.0
+* Tue Jul 08 2014 Ryan O'Hara <rohara@redhat.com> - 1.5.1-4
+- Include iprange tool (#1078487)
 
-* Sat Jun 07 2014 Fedora Release Engineering <rel-eng@lists.fedoraproject.org> - 1.4.25-2
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_21_Mass_Rebuild
+* Tue Jul 08 2014 Ryan O'Hara <rohara@redhat.com> - 1.5.1-3
+- Include man page for halog (#1078461)
 
-* Thu Mar 27 2014 Ryan O'Hara <rohara@redhat.com> - 1.4.25-1
-- Update to 1.4.25
+* Tue Jul 08 2014 Ryan O'Hara <rohara@redhat.com> - 1.5.1-2
+- Build with openssl and zlib (#1112184)
 
-* Sat Aug 03 2013 Fedora Release Engineering <rel-eng@lists.fedoraproject.org> - 1.4.24-2
-- Rebuilt for https://fedoraproject.org/wiki/Fedora_20_Mass_Rebuild
+* Tue Jul 08 2014 Ryan O'Hara <rohara@redhat.com> - 1.5.1-1
+- Update to stable release 1.5.1 (#1111714)
+
+* Fri Feb 28 2014 Ryan O'Hara <rohara@redhat.com> - 1.5-0.3.dev22
+- Use haproxy-systemd-wrapper in service file (#1067060)
+
+* Wed Feb 12 2014 Ryan O'Hara <rohara@redhat.com> - 1.5-0.2.dev22
+- Specify assigned UID in useradd
+
+* Mon Feb 10 2014 Ryan O'Hara <rohara@redhat.com> - 1.5-0.1.dev22
+- Update to development release 1.5-dev22 (#1043658)
+
+* Fri Jan 24 2014 Daniel Mach <dmach@redhat.com> - 1.4.24-3
+- Mass rebuild 2014-01-24
+
+* Fri Dec 27 2013 Daniel Mach <dmach@redhat.com> - 1.4.24-2
+- Mass rebuild 2013-12-27
 
 * Mon Jun 17 2013 Ryan O'Hara <rohara@redhat.com> - 1.4.24-1
 - Update to 1.4.24 (CVE-2013-2174, #975160)
@@ -399,7 +327,7 @@ exit 0
 - remove upstream patches, they are now part of source distribution
 
 * Sat Nov 22 2008 Jeremy Hinegardner <jeremy at hinegardner dot org> - 1.3.15.6-2
-- apply upstream patches 
+- apply upstream patches
 
 * Sat Nov 15 2008 Jeremy Hinegardner <jeremy at hinegardner dot org> - 1.3.15.6-1
 - update to 1.3.15.6
